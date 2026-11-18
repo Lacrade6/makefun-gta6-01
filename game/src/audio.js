@@ -102,6 +102,27 @@ export function createAudio() {
         setTimeout(() => blip(f, 0.22, 'triangle', 0.3), i * 110);
       });
     },
+    /** Heist alarm: three urgent two-tone blasts when the vault drill trips. */
+    alarm() {
+      if (!ctx) return;
+      for (let i = 0; i < 3; i += 1) {
+        setTimeout(() => { blip(880, 0.16, 'square', 0.22, 660); blip(660, 0.16, 'square', 0.22, 880); }, i * 340);
+      }
+    },
+    /** Dramatic sting for the loyalty-or-gold choice resolving. */
+    stinger() {
+      if (!ctx) return;
+      [220, 277, 330, 440].forEach((f, i) => {
+        setTimeout(() => blip(f, 0.5, 'sawtooth', 0.18), i * 90);
+      });
+    },
+    /** Sad trombone for a blown timer. */
+    fail() {
+      if (!ctx) return;
+      [330, 294, 262, 196].forEach((f, i) => {
+        setTimeout(() => blip(f, 0.25, 'sawtooth', 0.2), i * 170);
+      });
+    },
     busted() { [392, 311, 233].forEach((f, i) => setTimeout(() => blip(f, 0.35, 'sawtooth', 0.25), i * 200)); },
   };
 }

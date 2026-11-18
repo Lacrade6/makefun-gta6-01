@@ -11,6 +11,10 @@ const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
 const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
+// ?noraf=1: driver hook for automated playtests/screenshots — the page does
+// not run its own animation loop; the driver pumps world.frame() manually.
+// Without it the software-rendered rAF loop saturates the main thread and
+// starves the driver. The shipped game never uses this parameter.
 
 const app = document.getElementById('app');
 
@@ -64,4 +68,4 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-requestAnimationFrame(frame);
+if (params.get('noraf') !== '1') requestAnimationFrame(frame);

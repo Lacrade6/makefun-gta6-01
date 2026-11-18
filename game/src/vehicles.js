@@ -10,8 +10,10 @@ const POLICE_PAINT = 0xf2f2f2;
 
 export function buildCarMesh(paint, isPolice) {
   const group = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: paint });
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x182430 });
+  // Phong paint + glass: specular highlights so cars read as metal and glass
+  // under the low golden sun instead of flat matte boxes.
+  const bodyMat = new THREE.MeshPhongMaterial({ color: paint, shininess: 70, specular: 0x999999 });
+  const glassMat = new THREE.MeshPhongMaterial({ color: 0x182430, shininess: 120, specular: 0xcccccc });
   const darkMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(CAR.width, 0.75, CAR.length), bodyMat);
@@ -22,6 +24,16 @@ export function buildCarMesh(paint, isPolice) {
   cabin.position.set(0, 1.2, -0.2);
   cabin.castShadow = true;
   group.add(cabin);
+  // Dark lower skirt + chrome bumper strips: breaks up the slab-sided body.
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(CAR.width + 0.04, 0.22, CAR.length * 0.96), darkMat);
+  skirt.position.y = 0.22;
+  group.add(skirt);
+  const chromeMat = new THREE.MeshPhongMaterial({ color: 0xd8dde2, shininess: 140, specular: 0xffffff });
+  for (const bz of [CAR.length / 2 + 0.02, -CAR.length / 2 - 0.02]) {
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(CAR.width - 0.2, 0.16, 0.08), chromeMat);
+    bumper.position.set(0, 0.42, bz);
+    group.add(bumper);
+  }
   const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 12);
   wheelGeo.rotateZ(Math.PI / 2);
   const wheels = [];
@@ -74,10 +86,11 @@ export function createCar(scene, x, z, heading, paint, isPolice) {
     speed: 0,
     paint,
     isPolice: !!isPolice,
-    /** Arcade step: throttle -1..1, steer -1..1, handbrake on/off. */
-    step(dt, throttle, steer, handbrake, colliders, collideFn) {
-      const maxF = isPolice ? 40 : CAR.maxSpeed;
-      if (throttle > 0) this.speed += CAR.accel * throttle * dt;
+    /** Arcade step: throttle -1..1, steer -1..1, handbrake on/off, nos 0..1. */
+    step(dt, throttle, steer, handbrake, colliders, collideFn, nos = 0) {
+      const boosting = nos > 0 && throttle > 0;
+      const maxF = (isPolice ? 40 : CAR.maxSpeed) * (boosting ? CAR.nosBoost : 1);
+      if (throttle > 0) this.speed += CAR.accel * throttle * dt * (boosting ? 1.6 : 1);
       else if (throttle < 0) {
         if (this.speed > 0.5) this.speed -= CAR.brake * dt;
         else this.speed -= CAR.reverseAccel * dt;

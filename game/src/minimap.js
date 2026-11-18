@@ -62,6 +62,17 @@ export function createMinimap(canvas) {
         ctx.lineTo(tx, ty + pulse); ctx.lineTo(tx - pulse, ty);
         ctx.closePath(); ctx.fill();
       }
+      // Second target (the betrayal option): red diamond.
+      const target2 = state.missionTarget2;
+      if (target2) {
+        const [tx, ty] = toMap(target2.x, target2.z);
+        const pulse = 5 + Math.sin(performance.now() / 300 + 1.5) * 1.5;
+        ctx.fillStyle = '#ff3b30';
+        ctx.beginPath();
+        ctx.moveTo(tx, ty - pulse); ctx.lineTo(tx + pulse, ty);
+        ctx.lineTo(tx, ty + pulse); ctx.lineTo(tx - pulse, ty);
+        ctx.closePath(); ctx.fill();
+      }
       // Traffic cars.
       for (const car of state.trafficCars) dot(car.pos.x, car.pos.z, 2.5, '#f5a623');
       // Police: flashing blue.

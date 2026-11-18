@@ -2,13 +2,22 @@
 // sirens, ram the player's car, and try to arrest the player on foot. Their
 // numbers scale with the wanted level; they give up when the heat dies down.
 
-import { POLICE, WANTED } from './config.js';
+import { POLICE, WANTED, CALLSIGNS } from './config.js';
 import { createCar } from './vehicles.js';
 
 export function createPolice(scene, random) {
   const cars = [];
+  const roadblocks = [];
   let spawnTimer = 0;
   let ramTimer = 0;
+  let roadblockTimer = 0;
+  let spawned = 0;
+
+  function tagCar(car) {
+    car.callsign = CALLSIGNS[spawned % CALLSIGNS.length];
+    spawned += 1;
+    return car;
+  }
 
   function spawnOne(playerPos) {
     const angle = random.range(0, Math.PI * 2);
@@ -17,22 +26,60 @@ export function createPolice(scene, random) {
     const z = Math.max(-185, Math.min(185, playerPos.z + Math.sin(angle) * r));
     const car = createCar(scene, x, z, 0, 0xf2f2f2, true);
     car.speed = 12;
+    tagCar(car);
     cars.push(car);
+    return car;
+  }
+
+  /** Park a cruiser across the road ahead of the player: a roadblock. */
+  function spawnRoadblock(player) {
+    const focus = player.inCar ? player.inCar : player;
+    const heading = focus.heading;
+    const ahead = 34;
+    const side = roadblocks.length === 0 ? -4 : 4;
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
+    const x = Math.max(-185, Math.min(185, focus.pos.x + fx * ahead + fz * side));
+    const z = Math.max(-185, Math.min(185, focus.pos.z + fz * ahead - fx * side));
+    const car = createCar(scene, x, z, heading + Math.PI / 2, 0xf2f2f2, true);
+    car.speed = 0;
+    car.roadblock = true;
+    tagCar(car);
+    roadblocks.push(car);
     return car;
   }
 
   return {
     cars,
-    count() { return cars.length; },
+    roadblocks,
+    count() { return cars.length + roadblocks.length; },
     spawnAt(x, z, heading = 0) {
       const car = createCar(scene, x, z, heading, 0xf2f2f2, true);
       car.speed = 12;
+      tagCar(car);
       cars.push(car);
       return car;
     },
     /** How many cruisers the current wanted level calls for. */
     wantedCount(wanted) {
       return wanted <= 0 ? 0 : wanted === 1 ? 1 : wanted === 2 ? 2 : wanted === 3 ? 3 : wanted === 4 ? 4 : POLICE.maxCars;
+    },
+    /** Live unit list for the POLICE RESPONSE panel. */
+    units(playerPos) {
+      const list = [];
+      for (const car of cars) {
+        const d = Math.hypot(car.pos.x - playerPos.x, car.pos.z - playerPos.z);
+        list.push({
+          callsign: car.callsign || 'PD-?',
+          dist: Math.round(d),
+          tag: d < 6 ? 'RAMMING' : d < 22 ? 'PURSUIT' : 'SEARCHLIGHT',
+        });
+      }
+      for (const car of roadblocks) {
+        const d = Math.hypot(car.pos.x - playerPos.x, car.pos.z - playerPos.z);
+        list.push({ callsign: car.callsign || 'PD-?', dist: Math.round(d), tag: 'ROADBLOCK' });
+      }
+      return list;
     },
     step(dt, wanted, player, onRam, onArrest) {
       const want = this.wantedCount(wanted);
@@ -44,6 +91,16 @@ export function createPolice(scene, random) {
       if (cars.length > want) {
         const extra = cars.pop();
         scene.remove(extra.mesh);
+      }
+      // Roadblocks at 4+ stars: two cruisers parked across the road ahead.
+      roadblockTimer -= dt;
+      if (wanted >= 4) {
+        if (roadblocks.length < 2 && roadblockTimer <= 0) {
+          spawnRoadblock(player);
+          roadblockTimer = 1.5;
+        }
+      } else if (roadblocks.length > 0) {
+        for (const rb of roadblocks.splice(0)) scene.remove(rb.mesh);
       }
       if (ramTimer > 0) ramTimer -= dt;
       const target = player.inCar ? player.inCar.pos : player.pos;
@@ -76,10 +133,19 @@ export function createPolice(scene, random) {
           }
         }
       }
+      // Roadblock cruisers sit still, light bars flashing.
+      for (const car of roadblocks) {
+        if (car.lightBar) {
+          const phase = Math.floor(performance.now() / 180) % 2 === 0;
+          car.lightBar.red.material.color.setHex(phase ? 0xff2020 : 0x550000);
+          car.lightBar.blue.material.color.setHex(phase ? 0x2020ff : 0x000055);
+        }
+      }
     },
     clear() {
       for (const car of cars) scene.remove(car.mesh);
       cars.length = 0;
+      for (const rb of roadblocks.splice(0)) scene.remove(rb.mesh);
     },
   };
 }

@@ -6,6 +6,7 @@ export const ACTION_PUNCH = 2;
 export const ACTION_PAUSE = 4;
 export const ACTION_MUTE = 8;
 export const ACTION_CONFIRM = 16;
+export const ACTION_RADIO = 32;
 
 export function createInput(canvas) {
   const keys = new Set();
@@ -23,6 +24,7 @@ export function createInput(canvas) {
     if (event.code === 'KeyF') pressed.add(ACTION_PUNCH);
     if (event.code === 'KeyP' || event.code === 'Escape') pressed.add(ACTION_PAUSE);
     if (event.code === 'KeyM') pressed.add(ACTION_MUTE);
+    if (event.code === 'KeyR') pressed.add(ACTION_RADIO);
     if (event.code === 'Enter' || event.code === 'Space') pressed.add(ACTION_CONFIRM);
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   }
@@ -66,6 +68,8 @@ export function createInput(canvas) {
       dragX = 0; dragY = 0;
       return out;
     },
+    /** NOS boost held (Shift) — only meaningful while driving. */
+    nos() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
     takeActions() {
       let bits = 0;
       for (const bit of pressed) bits |= bit;

@@ -1,15 +1,19 @@
-// SOLMAR CITY — Streets of Gold: a 3D open-world crime game built for gta6-01 (Node 22,
+// SOLMAR CITY — Streets of Gold v2: a 3D open-world crime game built for gta6-01 (Node 22,
 // standard library only). The game is this directory's game/ folder, plain static files a
 // desktop browser loads offline: game/index.html and its ES modules plus a vendored
 // three.js build (game/vendor/three.module.min.js), no network request at runtime. The
 // program hands it in: it copies game/ and screenshots/ from beside this file to /output
 // and writes /output/dossier.json, the summary the judge reads, with the vendored
-// make.fun library. The game itself: a sun-soaked bay city you explore on foot and by
+// make.fun library. The game itself: a golden-hour bay city you explore on foot and by
 // car, traffic and pedestrians, cars to steal, a 0–5 star wanted level with pursuing
-// Solmar PD cruisers, a five-mission story for Rico, melee combat, a HUD with a live
-// minimap, synthesized sound, and save/load. Screenshots: 4 staged frames in
-// screenshots/ (the first by name is the cover) — a dusk police chase, a mission on
-// foot, a daytime drive, and the title screen.
+// Solmar PD cruisers, a police helicopter and roadblocks, an eight-mission story for
+// Rico — a three-stage Meridian Bank heist, a timed delivery, and a branching
+// loyalty-or-gold finale — NOS boosts, drift and near-miss scoring, REP levels, crew
+// dialogue, a radio panel and a live police-response panel, melee combat, particles
+// and screen shake, a HUD with a live minimap, synthesized sound, and save/load.
+// Screenshots: 4 staged frames in screenshots/ (the first by name is the cover) —
+// a golden-hour police chase with helicopter, the heist at the vault, a golden-hour
+// drive into the skyline, and the title screen.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
