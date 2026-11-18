@@ -1,53 +1,77 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard + mouse input. Keys are tracked by code; mouse drag orbits the camera.
+// Also exposes edge-triggered "pressed" actions (E, F, P, M) consumed once per frame.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export const ACTION_ENTER = 1;
+export const ACTION_PUNCH = 2;
+export const ACTION_PAUSE = 4;
+export const ACTION_MUTE = 8;
+export const ACTION_CONFIRM = 16;
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+export function createInput(canvas) {
+  const keys = new Set();
+  const pressed = new Set();
+  let dragX = 0;
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  let dragY = 0;
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  function onKeyDown(event) {
+    if (event.repeat) return;
+    keys.add(event.code);
+    if (event.code === 'KeyE') pressed.add(ACTION_ENTER);
+    if (event.code === 'KeyF') pressed.add(ACTION_PUNCH);
+    if (event.code === 'KeyP' || event.code === 'Escape') pressed.add(ACTION_PAUSE);
+    if (event.code === 'KeyM') pressed.add(ACTION_MUTE);
+    if (event.code === 'Enter' || event.code === 'Space') pressed.add(ACTION_CONFIRM);
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+  }
+  function onKeyUp(event) { keys.delete(event.code); }
+  function onMouseDown(event) { dragging = true; lastX = event.clientX; lastY = event.clientY; }
+  function onMouseMove(event) {
+    if (!dragging) return;
+    dragX += event.clientX - lastX;
+    dragY += event.clientY - lastY;
+    lastX = event.clientX; lastY = event.clientY;
+  }
+  function onMouseUp() { dragging = false; }
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  canvas.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    /** Forward/strafe input in -1..1, camera-relative. */
+    move() {
+      let f = 0, s = 0;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) f -= 1;
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) s -= 1;
+      if (keys.has('KeyD') || keys.has('ArrowRight')) s += 1;
+      return { forward: f, strafe: s, sprint: keys.has('ShiftLeft') || keys.has('ShiftRight') };
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
+    drive() {
+      let throttle = 0, steer = 0;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) throttle += 1;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) throttle -= 1;
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) steer -= 1;
+      if (keys.has('KeyD') || keys.has('ArrowRight')) steer += 1;
+      return { throttle, steer, handbrake: keys.has('Space') };
+    },
+    /** Pixels the mouse dragged since last read; resets each frame. */
+    takeDrag() {
+      const out = { x: dragX, y: dragY };
+      dragX = 0; dragY = 0;
+      return out;
+    },
     takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+      let bits = 0;
+      for (const bit of pressed) bits |= bit;
+      pressed.clear();
+      return bits;
     },
+    isDown(code) { return keys.has(code); },
   };
 }

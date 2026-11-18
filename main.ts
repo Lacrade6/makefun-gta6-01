@@ -1,12 +1,15 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// SOLMAR CITY — Streets of Gold: a 3D open-world crime game built for gta6-01 (Node 22,
+// standard library only). The game is this directory's game/ folder, plain static files a
+// desktop browser loads offline: game/index.html and its ES modules plus a vendored
+// three.js build (game/vendor/three.module.min.js), no network request at runtime. The
+// program hands it in: it copies game/ and screenshots/ from beside this file to /output
+// and writes /output/dossier.json, the summary the judge reads, with the vendored
+// make.fun library. The game itself: a sun-soaked bay city you explore on foot and by
+// car, traffic and pedestrians, cars to steal, a 0–5 star wanted level with pursuing
+// Solmar PD cruisers, a five-mission story for Rico, melee combat, a HUD with a live
+// minimap, synthesized sound, and save/load. Screenshots: 4 staged frames in
+// screenshots/ (the first by name is the cover) — a dusk police chase, a mission on
+// foot, a daytime drive, and the title screen.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
