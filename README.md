@@ -1,68 +1,60 @@
-# Make GTA 6 — Solmar City: Streets of Gold (v2)
+[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
+[![make.fun rank](https://make.fun/badge/gta6-01/Lacrade6/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01)
+[![make.fun reward](https://make.fun/badge/gta6-01/Lacrade6/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01)
 
-[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/Lacrade6/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/Lacrade6/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+# Solmar City — Streets of Gold
 
-A 3D open-world crime game in the browser, built for [make.fun bounty
-`gta6-01`](https://make.fun/bounty/gta6-01) — "Make GTA 6".
+A 3D open-world crime game in the spirit of GTA VI, built for the
+[make.fun GTA 6 bounty](https://make.fun/bounty/gta6-01).
 
-You are Jax Marlowe, fresh out of prison and broke in Solmar City — a
-sun-soaked bay city where every street pays if you are fast enough. Rico has
-a plan: eight jobs, one Meridian Bank heist, one timed run, and a final
-choice — stay loyal, or sell him out for twice the cash.
+Solmar City is a golden-hour bay city. You are **Rico**, a driver with one
+last score in him. Explore the city on foot or steal any car on the street,
+outrun the Solmar PD through five wanted stars, and play through an
+eight-mission story: the three-stage Meridian Bank heist, a timed delivery
+across town, and a branching finale where you choose **loyalty or gold**.
 
 ## What is in the game
 
-- **A living city at golden hour** — gradient sky dome with a low sun,
-  long real shadows, warm haze, procedural asphalt / sidewalk / grass
-  textures, buildings with lit windows that glow at dusk, billboards,
-  neon signs, palm trees, a central park and a marina bay.
-- **On foot and by car** — walk, sprint, steal any parked or traffic car
-  (E), arcade driving with handbrake, traffic (14 cars) and pedestrians
-  (26) who flee from danger.
-- **Wanted system** — 0–5 stars with pursuing Solmar PD cruisers that ram
-  your car and arrest you on foot; at 3+ stars a police helicopter joins
-  with a searchlight, at 4+ stars cruisers set roadblocks ahead of you. A
-  live POLICE RESPONSE panel names every unit (IBIS-43, GULL-1, …) with its
-  distance and behavior — PURSUIT, RAMMING, ROADBLOCK, IN SIGHT. Lay low
-  and the heat fades.
-- **An 8-mission story** — meet Rico, steal wheels, the bank job, a hot
-  pursuit, the big score, then a three-stage **Meridian heist** (case the
-  bank, crack the vault while the drill runs, getaway under 3 stars), a
-  **90-second timed delivery**, and a branching finale: **loyalty or gold**
-  ($5,000 from Rico, $12,000 from the buyer — with consequences). Rico and
-  Nina Vale (getaway planner) brief every job in dialogue boxes, including
-  a betrayal beat.
-- **Driving depth** — NOS boost on Shift with a gauge, drift scoring and
-  near-miss bonuses with floating cash text, REP levels that grow as you
-  earn, and street cash to grab.
-- **Combat & polish** — melee punches (F) with impact sparks and screen
-  shake, exhaust puffs, damage smoke, police-ram shake, synthesized
-  WebAudio (engine hum, sirens, heist alarm, mission stingers), pulsing
-  wanted stars, a cash counter, a mission countdown timer, a radio panel
-  (R switches station), district + street labels, a day/time clock, and a
-  live circular minimap with gold/red mission beacons.
-- **Save / load** — progress saves locally; continue from the title screen.
+- A full open world: a gridded coastal city with traffic, pedestrians, a
+  beach and a bay, all lit by a low golden sun.
+- Driving with NOS boost, drift scoring and near-miss scoring; REP levels
+  that rise with stunts and missions.
+- A 0–5 star wanted system: police cruisers that chase and ram, a police
+  helicopter from 3 stars, and roadblocks from 4 stars.
+- Melee combat on foot, pickups (cash, health, NOS), particles, screen
+  shake and fully synthesized sound — engine, sirens, radio stations.
+- A HUD with health, wanted stars, speed, REP, a live minimap, a radio
+  panel and a live police-response panel.
+- Save and continue from the title screen (progress lives in the browser).
 
-## Play
+## The story — eight missions
+
+1. **First Wheels** — steal a car and bring it to Mara's garage.
+2. **The Getaway** — three checkpoints with two stars on your tail.
+3. **Meridian: The Inside Man** — walk into the bank on foot and wait for the signal.
+4. **Meridian: The Vault** — hold the bank floor for 25 seconds, then grab the bags.
+5. **Meridian: The Split** — drive the loot home under a three-star chase.
+6. **Rush Hour** — three deliveries in 100 seconds.
+7. **The Informant** — tail the grey sedan, then have a word with him.
+8. **Loyalty or Gold** — the finale. Defend the crew, or take the stash and run.
+
+## Controls
+
+- **W / A / S / D** — move / drive (on foot: walk, **Shift** to sprint)
+- **Mouse** — look around (click the game to lock the pointer)
+- **E** — enter / exit a car (stand next to one)
+- **Space** — handbrake / drift (in a car), jump (on foot)
+- **Shift** — NOS boost (in a car)
+- **F** — punch (on foot)
+- **M** — next mission / **P** — pause · **R** — restart a failed mission
+- **1 / 2** — choose in the finale · **H** — toggle radio
+
+## Play it
 
 ```sh
 node serve.ts
 # open http://localhost:8080
 ```
 
-## Controls
-
-- **WASD** — move / drive
-- **E** — enter / exit car
-- **Space** — handbrake
-- **F** — melee attack
-- **SHIFT** — sprint
-- **M** — mute, **P** — pause
-
-## Entry
-
-`main.ts` (Node 22, standard library only) copies `game/` and
-`screenshots/` to `/output` and writes `dossier.json`. The game itself is
-plain static files under `game/` (three.js vendored, no network).
+Static files only: `game/index.html` and its ES modules, with three.js
+vendored under `game/vendor/`. No network request at runtime.

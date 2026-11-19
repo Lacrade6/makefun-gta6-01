@@ -1,37 +1,50 @@
-// Melee combat: the F punch. Finds the nearest pedestrian (or cop on foot —
-// there are none on foot, so cops are hit through their cruisers) inside range
-// in front of the player, knocks them down, and raises the wanted level.
+// Melee combat on foot. One punch checks an arc in front of Rico: a
+// pedestrian caught in it is knocked down (and the law notices), a cruiser
+// door gets dented for style points. Punching is the only weapon — Solmar
+// settles things with fists.
 
-import { PLAYER } from './config.js';
+import { CFG } from './config.js';
+import { angleDelta } from './rand.js';
 
-export function createCombat() {
-  return {
-    /**
-     * Try a punch. Returns 'ped' | 'none'. The caller applies wanted stars,
-     * sound and the floating toast.
-     */
-    punch(player, traffic, audio) {
-      if (!player.punch()) return 'none';
-      if (audio) audio.punch();
-      const fx = Math.sin(player.heading);
-      const fz = Math.cos(player.heading);
-      let best = null; let bestD = PLAYER.punchRange;
-      for (const ped of traffic.peds) {
-        if (ped.down > 0) continue;
-        const dx = ped.pos.x - player.pos.x;
-        const dz = ped.pos.z - player.pos.z;
-        const d = Math.hypot(dx, dz);
-        if (d > bestD) continue;
-        const dot = (dx * fx + dz * fz) / (d || 1);
-        if (dot < 0.1) continue;
-        best = ped; bestD = d;
+export class Combat {
+  constructor() {
+    this.lastHitAt = 0;
+  }
+
+  // Returns a small report of what the punch connected with.
+  punch(player, traffic, police, now) {
+    const report = { ped: null, cruiser: null };
+    if (!player.onFoot) return report;
+    this.lastHitAt = now;
+    const fx = Math.sin(player.heading);
+    const fz = Math.cos(player.heading);
+    for (const ped of traffic.peds) {
+      if (!ped.alive) continue;
+      const dx = ped.x - player.x;
+      const dz = ped.z - player.z;
+      const d = Math.hypot(dx, dz);
+      if (d > CFG.player.punchRange) continue;
+      const ang = angleDelta(player.heading, Math.atan2(dx, dz));
+      if (Math.abs(ang) > CFG.player.punchArc) continue;
+      ped.alive = false;
+      ped.mesh.visible = false;
+      ped.flee = 0;
+      // They get up and walk off after a while.
+      setTimeout(() => {
+        ped.alive = true;
+        ped.mesh.visible = true;
+        ped.flee = 2;
+      }, 6000);
+      report.ped = ped;
+      break;
+    }
+    for (const cruiser of police.cruisers) {
+      const d = Math.hypot(cruiser.x - player.x, cruiser.z - player.z);
+      if (d < 3.4) {
+        report.cruiser = cruiser;
+        break;
       }
-      if (!best) return 'none';
-      best.down = 2.2;
-      best.flee = 0;
-      best.mesh.position.y = 0.4;
-      if (audio) audio.hit();
-      return 'ped';
-    },
-  };
+    }
+    return report;
+  }
 }

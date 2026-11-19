@@ -1,19 +1,18 @@
-// A tiny static server for game/ (Node 22, standard library only), so an entry can be played
-// locally without a build step: `node serve.ts` serves game/ on http://localhost:8080.
-// It sends the MIME types a browser game needs, refuses any path outside game/, and otherwise
-// does nothing clever: this is a development convenience, not a web server for the internet.
-import { createReadStream, statSync } from 'node:fs';
+// A tiny static file server for local play-testing of game/.
+// Run `node serve.ts` and open http://localhost:8080 in a desktop browser.
+// It serves only files inside game/, sends the MIME types a browser game
+// needs, and refuses everything else. Development convenience only.
+
+import { readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
-const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
-const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
+const gameRoot = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+const wantedPort = Number(process.argv[2] ?? process.env.PORT ?? 8080);
+const port = Number.isInteger(wantedPort) && wantedPort > 0 && wantedPort < 65536 ? wantedPort : 8080;
 
-const MIME: Record<string, string> = {
+const mimeByExt = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -22,51 +21,46 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8',
 };
 
-createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname: string;
+const server = createServer((req, res) => {
+  let path = '/';
   try {
-    pathname = decodeURIComponent(url.pathname);
+    path = decodeURIComponent(new URL(req.url ?? '/', 'http://127.0.0.1').pathname);
   } catch {
-    response.writeHead(400).end('bad request');
+    res.writeHead(400);
+    res.end('bad request');
     return;
   }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
+  if (path.endsWith('/')) path += 'index.html';
+  const file = resolve(join(gameRoot, normalize(path)));
+  if (file !== gameRoot && !file.startsWith(gameRoot + sep)) {
+    res.writeHead(403);
+    res.end('forbidden');
     return;
   }
-  let size: number;
+  let body;
   try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
+    if (!statSync(file).isFile()) throw new Error('not a file');
+    body = readFileSync(file);
   } catch {
-    response.writeHead(404).end('not found');
+    res.writeHead(404);
+    res.end('not found');
     return;
   }
-  response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
+  res.writeHead(200, {
+    'content-type': mimeByExt[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'content-length': body.length,
     'cache-control': 'no-store',
   });
-  createReadStream(file).pipe(response);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`game/ is on http://localhost:${port}`);
+  res.end(body);
+});
+
+server.listen(port, '127.0.0.1', () => {
+  console.log(`Solmar City is on http://localhost:${port} (serving ${gameRoot})`);
 });

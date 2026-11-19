@@ -1,81 +1,86 @@
-// Keyboard + mouse input. Keys are tracked by code; mouse drag orbits the camera.
-// Also exposes edge-triggered "pressed" actions (E, F, P, M) consumed once per frame.
+// Keyboard and mouse input. One object owns every key the game reads, plus
+// pointer-lock mouse look. Keys are read by code ('KeyW'), never by the
+// character they print, so layouts do not matter.
 
-export const ACTION_ENTER = 1;
-export const ACTION_PUNCH = 2;
-export const ACTION_PAUSE = 4;
-export const ACTION_MUTE = 8;
-export const ACTION_CONFIRM = 16;
-export const ACTION_RADIO = 32;
-
-export function createInput(canvas) {
-  const keys = new Set();
-  const pressed = new Set();
-  let dragX = 0;
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
-  let dragY = 0;
-
-  function onKeyDown(event) {
-    if (event.repeat) return;
-    keys.add(event.code);
-    if (event.code === 'KeyE') pressed.add(ACTION_ENTER);
-    if (event.code === 'KeyF') pressed.add(ACTION_PUNCH);
-    if (event.code === 'KeyP' || event.code === 'Escape') pressed.add(ACTION_PAUSE);
-    if (event.code === 'KeyM') pressed.add(ACTION_MUTE);
-    if (event.code === 'KeyR') pressed.add(ACTION_RADIO);
-    if (event.code === 'Enter' || event.code === 'Space') pressed.add(ACTION_CONFIRM);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
+export class Input {
+  constructor() {
+    this.down = new Set();
+    this.pressed = new Set();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.locked = false;
+    this.anyKey = false;
+    this._onKeyDown = (e) => {
+      if (e.repeat) return;
+      this.down.add(e.code);
+      this.pressed.add(e.code);
+      this.anyKey = true;
+      if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
+    };
+    this._onKeyUp = (e) => {
+      this.down.delete(e.code);
+    };
+    this._onMouse = (e) => {
+      if (!this.locked) return;
+      this.mouseDX += e.movementX || 0;
+      this.mouseDY += e.movementY || 0;
+    };
+    this._onLock = () => {
+      this.locked = document.pointerLockElement === document.body;
+    };
+    this._onBlur = () => {
+      this.down.clear();
+    };
   }
-  function onKeyUp(event) { keys.delete(event.code); }
-  function onMouseDown(event) { dragging = true; lastX = event.clientX; lastY = event.clientY; }
-  function onMouseMove(event) {
-    if (!dragging) return;
-    dragX += event.clientX - lastX;
-    dragY += event.clientY - lastY;
-    lastX = event.clientX; lastY = event.clientY;
+
+  attach() {
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('mousemove', this._onMouse);
+    document.addEventListener('pointerlockchange', this._onLock);
+    window.addEventListener('blur', this._onBlur);
+    document.body.addEventListener('click', () => {
+      if (!this.locked && document.body.requestPointerLock) {
+        document.body.requestPointerLock();
+      }
+    });
   }
-  function onMouseUp() { dragging = false; }
 
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  canvas.addEventListener('mousedown', onMouseDown);
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mouseup', onMouseUp);
+  isDown(code) {
+    return this.down.has(code);
+  }
 
-  return {
-    /** Forward/strafe input in -1..1, camera-relative. */
-    move() {
-      let f = 0, s = 0;
-      if (keys.has('KeyW') || keys.has('ArrowUp')) f += 1;
-      if (keys.has('KeyS') || keys.has('ArrowDown')) f -= 1;
-      if (keys.has('KeyA') || keys.has('ArrowLeft')) s -= 1;
-      if (keys.has('KeyD') || keys.has('ArrowRight')) s += 1;
-      return { forward: f, strafe: s, sprint: keys.has('ShiftLeft') || keys.has('ShiftRight') };
-    },
-    drive() {
-      let throttle = 0, steer = 0;
-      if (keys.has('KeyW') || keys.has('ArrowUp')) throttle += 1;
-      if (keys.has('KeyS') || keys.has('ArrowDown')) throttle -= 1;
-      if (keys.has('KeyA') || keys.has('ArrowLeft')) steer -= 1;
-      if (keys.has('KeyD') || keys.has('ArrowRight')) steer += 1;
-      return { throttle, steer, handbrake: keys.has('Space') };
-    },
-    /** Pixels the mouse dragged since last read; resets each frame. */
-    takeDrag() {
-      const out = { x: dragX, y: dragY };
-      dragX = 0; dragY = 0;
-      return out;
-    },
-    /** NOS boost held (Shift) — only meaningful while driving. */
-    nos() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
-    takeActions() {
-      let bits = 0;
-      for (const bit of pressed) bits |= bit;
-      pressed.clear();
-      return bits;
-    },
-    isDown(code) { return keys.has(code); },
-  };
+  // True once, on the frame the key went down. Cleared every frame by the
+  // main loop after the game has read the input.
+  wasPressed(code) {
+    return this.pressed.has(code);
+  }
+
+  endFrame() {
+    this.pressed.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.anyKey = false;
+  }
+
+  // Drop every held key (used when the game loses focus or changes state).
+  reset() {
+    this.down.clear();
+    this.pressed.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+  }
+
+  // Steering / throttle in -1..1, built from the held keys.
+  steerAxis() {
+    const left = this.isDown('KeyA') || this.isDown('ArrowLeft');
+    const right = this.isDown('KeyD') || this.isDown('ArrowRight');
+    return (left ? -1 : 0) + (right ? 1 : 0);
+  }
+
+  throttleAxis() {
+    const fwd = this.isDown('KeyW') || this.isDown('ArrowUp');
+    const back = this.isDown('KeyS') || this.isDown('ArrowDown');
+    return (fwd ? 1 : 0) + (back ? -1 : 0);
+  }
 }

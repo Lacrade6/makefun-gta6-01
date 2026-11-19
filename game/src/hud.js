@@ -1,176 +1,195 @@
-// The HUD: DOM overlay over the 3D view — wanted stars, money, health bar,
-// mission objective, speedometer, hint line and toasts. Pure DOM so it stays
-// crisp at any resolution and reads clearly in screenshots.
+// The HUD: health, cash, REP, wanted stars, speed, the mission objective,
+// a live minimap drawn on a 2D canvas, the radio panel, the police-response
+// panel, dialogue lines and centre-screen messages. All DOM — the 3D scene
+// never draws UI.
 
-export function createHud() {
-  const el = (id) => document.getElementById(id);
-  const hud = el('hud');
-  const starsEl = el('stars');
-  const moneyEl = el('money');
-  const healthEl = el('healthfill');
-  const missionLabel = el('missionLabel');
-  const missionText = el('missionText');
-  const speedEl = el('speed');
-  const speedValue = el('speedValue');
-  const toastEl = el('toast');
-  const hintEl = el('hint');
-  const timerEl = el('timer');
-  const policeEl = el('policePanel');
-  const policeListEl = el('policeList');
-  const policeHeadEl = el('policeHead');
-  const dialogueEl = el('dialogue');
-  const radioStationEl = el('radioStation');
-  const radioTrackEl = el('radioTrack');
-  const floatEl = el('floatScore');
-  const repEl = el('repLevel');
-  const repFillEl = el('repFill');
-  const nosEl = el('nos');
-  const nosFillEl = el('nosFill');
-  const districtEl = el('district');
-  const clockEl = el('clock');
-  const missionProgEl = el('missionProgress');
-  const missionProgFillEl = el('missionProgFill');
-  const missionStageEl = el('missionStage');
-  let toastTimer = null;
-  let dialogueTimer = null;
-  let floatTimer = null;
-  let lastMoney = null;
+import { CFG } from './config.js';
 
-  function tagClass(tag) {
-    if (tag === 'RAMMING') return 'tag ram';
-    if (tag === 'ROADBLOCK') return 'tag block';
-    if (tag === 'IN SIGHT') return 'tag sight';
-    if (tag === 'BOXING IN') return 'tag ram';
-    return 'tag';
+export class HUD {
+  constructor() {
+    this.el = (id) => document.getElementById(id);
+    this.healthBar = this.el('health-bar');
+    this.cashEl = this.el('cash');
+    this.repEl = this.el('rep');
+    this.repLevelEl = this.el('rep-level');
+    this.starsEl = this.el('stars');
+    this.speedNum = this.el('speed-num');
+    this.speedExtra = this.el('speed-extra');
+    this.missionTitle = this.el('mission-title');
+    this.objectiveText = this.el('objective-text');
+    this.objectiveSub = this.el('objective-sub');
+    this.minimap = this.el('minimap');
+    this.mm = this.minimap.getContext('2d');
+    this.radioStation = this.el('radio-station');
+    this.radioTrack = this.el('radio-track');
+    this.policeText = this.el('police-text');
+    this.dialogue = this.el('dialogue');
+    this.dialogueName = this.el('dialogue-name');
+    this.dialogueText = this.el('dialogue-text');
+    this.centerMsg = this.el('center-msg');
+    this.centerSub = this.el('center-sub');
+    this.hint = this.el('hint');
+    this.vignette = this.el('vignette');
+    this.dialogueTimer = null;
+    this.centerTimer = null;
+    this.visible = false;
   }
 
-  return {
-    show() { hud.classList.add('on'); },
-    hide() { hud.classList.remove('on'); },
-    setStars(n) {
-      let html = '';
-      for (let i = 0; i < 5; i += 1) html += `<span class="${i < n ? '' : 'off'}">★</span>`;
-      starsEl.innerHTML = html;
-      starsEl.classList.toggle('hot', n > 0);
-    },
-    setMoney(n) {
-      moneyEl.textContent = `$${n.toLocaleString('en-US')}`;
-      if (lastMoney !== null && n !== lastMoney) {
-        moneyEl.classList.remove('bump');
-        void moneyEl.offsetWidth; // restart the animation
-        moneyEl.classList.add('bump');
-      }
-      lastMoney = n;
-    },
-    setTimer(seconds) {
-      if (seconds == null) {
-        timerEl.style.display = 'none';
-        return;
-      }
-      timerEl.style.display = 'block';
-      timerEl.textContent = `⏱ ${Math.max(0, Math.ceil(seconds))}s`;
-      timerEl.classList.toggle('urgent', seconds <= 15);
-    },
-    /** Mission progress: overall story progress + stage label, e.g. STAGE 2/3. */
-    setMissionProgress(frac, label) {
-      missionProgEl.style.display = '';
-      missionProgFillEl.style.width = `${Math.max(0, Math.min(100, frac * 100))}%`;
-      missionStageEl.textContent = label;
-    },
-    hideMissionProgress() { missionProgEl.style.display = 'none'; },
-    /** Police response panel: named units, distances, behavior tags. */
-    setPolice(units, heliInSight, stars) {
-      if (stars <= 0) {
-        policeEl.style.display = 'none';
-        return;
-      }
-      policeEl.style.display = 'block';
-      const total = units.length + (heliInSight ? 1 : 0);
-      policeHeadEl.textContent = `POLICE RESPONSE — ${total} UNIT${total === 1 ? '' : 'S'} · CODE ${Math.min(5, stars)}`;
-      let html = '';
-      for (const u of units) {
-        html += `<div class="unit"><span class="call">${u.callsign}</span><span class="dist">${u.dist}m</span><span class="${tagClass(u.tag)}">${u.tag}</span></div>`;
-      }
-      if (heliInSight) html += `<div class="unit"><span class="call">AIR-1</span><span class="dist">—</span><span class="tag sight">IN SIGHT</span></div>`;
-      policeListEl.innerHTML = html;
-    },
-    /** Character dialogue box with portrait initials. Auto-hides unless sticky. */
-    showDialogue(who, text, sticky = false) {
-      el('dlgPortrait').textContent = who.initials;
-      el('dlgPortrait').style.background = who.color;
-      el('dlgName').textContent = `${who.name} — ${who.role}`;
-      el('dlgText').textContent = text;
-      dialogueEl.classList.add('on');
-      if (dialogueTimer) clearTimeout(dialogueTimer);
-      if (!sticky) dialogueTimer = setTimeout(() => dialogueEl.classList.remove('on'), 7000);
-    },
-    hideDialogue() {
-      dialogueEl.classList.remove('on');
-      if (dialogueTimer) clearTimeout(dialogueTimer);
-    },
-    setRadio(radio) {
-      radioStationEl.textContent = radio.station;
-      radioTrackEl.textContent = `${radio.track} — ${radio.artist}`;
-    },
-    /** Floating score text (DRIFT / NEAR MISS) near the speedometer. */
-    floatScore(text) {
-      floatEl.textContent = text;
-      floatEl.classList.remove('pop');
-      void floatEl.offsetWidth;
-      floatEl.classList.add('pop');
-      if (floatTimer) clearTimeout(floatTimer);
-      floatTimer = setTimeout(() => floatEl.classList.remove('pop'), 1600);
-    },
-    setRep(level, frac) {
-      repEl.textContent = `REP LV ${level}`;
-      repFillEl.style.width = `${Math.max(0, Math.min(100, frac * 100))}%`;
-    },
-    setNos(frac, driving) {
-      nosEl.classList.toggle('on', driving);
-      nosFillEl.style.width = `${Math.max(0, Math.min(100, frac * 100))}%`;
-      nosEl.classList.toggle('boosting', driving && frac > 0.02);
-    },
-    setDistrict(name, tag, street) {
-      districtEl.innerHTML = `<b>${name}</b> · ${street}<span>${tag}</span>`;
-    },
-    setClock(text) { clockEl.textContent = text; },
-    setHealth(h, max) { healthEl.style.width = `${Math.max(0, (h / max) * 100)}%`; },
-    setMission(title, text) {
-      missionLabel.textContent = title;
-      missionText.textContent = text;
-    },
-    setSpeed(mph, driving) {
-      speedEl.classList.toggle('on', driving);
-      if (driving) speedValue.textContent = String(Math.round(mph));
-    },
-    setHint(text) { hintEl.textContent = text; },
-    toast(text, ms = 2600) {
-      toastEl.textContent = text;
-      toastEl.style.opacity = '1';
-      if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => { toastEl.style.opacity = '0'; }, ms);
-    },
-    showScreen(id) {
-      for (const s of ['startScreen', 'pauseScreen', 'overScreen']) {
-        document.getElementById(s).classList.toggle('on', s === id);
-      }
-    },
-    hideScreens() {
-      for (const s of ['startScreen', 'pauseScreen', 'overScreen']) {
-        document.getElementById(s).classList.remove('on');
-      }
-    },
-    setOverText(text) { el('overText').textContent = text; },
-    setContinueVisible(visible) {
-      el('continueBtn').style.display = visible ? '' : 'none';
-    },
-    onPlay(fn) { el('playBtn').addEventListener('click', fn); },
-    onContinue(fn) { el('continueBtn').addEventListener('click', fn); },
-    onResume(fn) { el('resumeBtn').addEventListener('click', fn); },
-    onSave(fn) { el('saveBtn').addEventListener('click', fn); },
-    onQuit(fn) { el('quitBtn').addEventListener('click', fn); },
-    onRetry(fn) { el('retryBtn').addEventListener('click', fn); },
-    onOverTitle(fn) { el('overTitleBtn').addEventListener('click', fn); },
-    announce(text) { el('status').textContent = text; },
-  };
+  showGame() {
+    this.visible = true;
+    for (const id of ['hud-top-left', 'objective', 'minimap-wrap', 'speedo', 'hint']) {
+      this.el(id).style.display = '';
+    }
+    this.el('title-screen').style.display = 'none';
+    this.el('loading').style.display = 'none';
+  }
+
+  showTitle(canContinue, mission) {
+    this.el('title-screen').style.display = '';
+    this.el('loading').style.display = 'none';
+    const btn = this.el('btn-continue');
+    if (canContinue) {
+      btn.style.display = '';
+      this.el('continue-mission').textContent = String(mission);
+    } else {
+      btn.style.display = 'none';
+    }
+  }
+
+  setPause(paused) {
+    this.el('pause-screen').style.display = paused ? 'flex' : 'none';
+  }
+
+  setHint(text) {
+    this.hint.textContent = text;
+  }
+
+  showDialogue(name, text) {
+    this.dialogueName.textContent = name;
+    this.dialogueText.textContent = text;
+    this.dialogue.style.display = 'block';
+    if (this.dialogueTimer) clearTimeout(this.dialogueTimer);
+    this.dialogueTimer = setTimeout(() => {
+      this.dialogue.style.display = 'none';
+    }, 4200);
+  }
+
+  showCenter(msg, sub = '') {
+    this.centerMsg.textContent = msg;
+    this.centerSub.textContent = sub;
+    this.centerMsg.style.display = 'block';
+    this.centerSub.style.display = sub ? 'block' : 'none';
+    if (this.centerTimer) clearTimeout(this.centerTimer);
+    this.centerTimer = setTimeout(() => {
+      this.centerMsg.style.display = 'none';
+      this.centerSub.style.display = 'none';
+    }, 2600);
+  }
+
+  update(game) {
+    if (!this.visible) return;
+    const player = game.player;
+    this.healthBar.style.width = `${Math.max(0, player.health)}%`;
+    this.cashEl.textContent = String(player.cash);
+    this.repEl.textContent = String(game.rep);
+    this.repLevelEl.textContent = String(game.repLevel);
+    let stars = '';
+    for (let i = 0; i < 5; i++) {
+      stars += `<span class="${i < game.police.wanted ? '' : 'off'}">★</span>`;
+    }
+    this.starsEl.innerHTML = stars;
+    const speed = player.onFoot
+      ? Math.round(player.speed * 2.2)
+      : Math.round(Math.abs(player.car ? player.car.speed : 0) * 2.24);
+    this.speedNum.textContent = String(speed);
+    let extra = '';
+    if (!player.onFoot && player.car) {
+      const car = player.car;
+      extra = car.boosting ? 'NOS BOOST!' : `NOS ${Math.round(car.nos)}%`;
+      if (car.drifting) extra += ' · DRIFT!';
+    } else if (player.onFoot) {
+      extra = 'ON FOOT — E near a car to steal it';
+    }
+    this.speedExtra.textContent = extra;
+    const obj = game.missions.objectiveText();
+    this.missionTitle.textContent = obj.title;
+    this.objectiveText.textContent = obj.text;
+    this.objectiveSub.textContent = obj.sub;
+    const station = game.audio.currentStation();
+    this.radioStation.textContent = station.name;
+    this.radioTrack.textContent = station.track;
+    this.policeText.textContent = game.police.responseLabel();
+    this.vignette.style.opacity = player.health < 35 ? String((35 - player.health) / 35) : '0';
+    this._drawMinimap(game);
+  }
+
+  _drawMinimap(game) {
+    const g = this.mm;
+    const S = 210;
+    const half = CFG.city.half;
+    const toMap = (x, z) => [((x + half) / (half * 2)) * S, ((z + half) / (half * 2)) * S];
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = 'rgba(12,12,28,0.9)';
+    g.fillRect(0, 0, S, S);
+    // Water on the east edge.
+    g.fillStyle = '#2a6a8a';
+    const [wx] = toMap(CFG.city.waterX, 0);
+    g.fillRect(wx, 0, S - wx, S);
+    // Roads.
+    g.strokeStyle = '#55555f';
+    g.lineWidth = 3;
+    for (const line of game.city.roadLines) {
+      const [rx] = toMap(line, 0);
+      const [, rz] = toMap(0, line);
+      g.beginPath(); g.moveTo(rx, 0); g.lineTo(rx, S); g.stroke();
+      g.beginPath(); g.moveTo(0, rz); g.lineTo(S, rz); g.stroke();
+    }
+    // Buildings as faint blocks (palms and lamps are too small to draw).
+    g.fillStyle = 'rgba(200,180,140,0.5)';
+    for (const c of game.city.colliders) {
+      if (c.hx < 1) continue;
+      const [bx, bz] = toMap(c.x - c.hx, c.z - c.hz);
+      const [ex, ez] = toMap(c.x + c.hx, c.z + c.hz);
+      g.fillRect(bx, bz, ex - bx, ez - bz);
+    }
+    // Mission target: pulsing gold diamond.
+    const target = game.missions.currentTarget();
+    if (target) {
+      const [tx, ty] = toMap(target.x, target.z);
+      const pulse = 5 + Math.sin(game.time * 5) * 2;
+      g.fillStyle = '#ffd76a';
+      g.beginPath();
+      g.moveTo(tx, ty - pulse);
+      g.lineTo(tx + pulse, ty);
+      g.lineTo(tx, ty + pulse);
+      g.lineTo(tx - pulse, ty);
+      g.closePath();
+      g.fill();
+    }
+    // Traffic as grey dots, police as blue/red dots.
+    g.fillStyle = '#bbbbbb';
+    for (const car of game.traffic.cars) {
+      const [cx, cy] = toMap(car.x, car.z);
+      g.fillRect(cx - 1.5, cy - 1.5, 3, 3);
+    }
+    for (const cruiser of game.police.cruisers) {
+      const [cx, cy] = toMap(cruiser.x, cruiser.z);
+      g.fillStyle = '#5a8aff';
+      g.beginPath(); g.arc(cx, cy, 3.5, 0, Math.PI * 2); g.fill();
+    }
+    // Player arrow.
+    const [px, py] = toMap(game.player.x, game.player.z);
+    const heading = game.player.onFoot ? game.player.heading : (game.player.car ? game.player.car.heading : 0);
+    g.save();
+    g.translate(px, py);
+    g.rotate(Math.PI - heading);
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.moveTo(0, -7);
+    g.lineTo(5, 6);
+    g.lineTo(-5, 6);
+    g.closePath();
+    g.fill();
+    g.restore();
+  }
 }
