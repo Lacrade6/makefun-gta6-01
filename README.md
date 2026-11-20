@@ -1,5 +1,11 @@
 # Solmar City — Streets of Gold
 
+[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
+[![make.fun rank](https://make.fun/badge/gta6-01/Lacrade6/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01)
+[![make.fun reward](https://make.fun/badge/gta6-01/Lacrade6/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01)
+
+Entry for the [make.fun GTA 6 bounty](https://make.fun/bounty/gta6-01).
+
 A 3D open-world crime game in the browser, built with three.js (vendored).
 You play Rico, a driver-for-hire in a golden-hour coastal city. Steal cars,
 outrun the police, run jobs for your crew, and pull off the three-stage
