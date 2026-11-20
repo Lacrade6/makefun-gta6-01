@@ -1,66 +1,41 @@
-// A tiny static file server for local play-testing of game/.
-// Run `node serve.ts` and open http://localhost:8080 in a desktop browser.
-// It serves only files inside game/, sends the MIME types a browser game
-// needs, and refuses everything else. Development convenience only.
-
-import { readFileSync, statSync } from 'node:fs';
+// Tiny static file server for local play: node serve.ts -> http://localhost:8080
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { dirname, extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const gameRoot = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const wantedPort = Number(process.argv[2] ?? process.env.PORT ?? 8080);
-const port = Number.isInteger(wantedPort) && wantedPort > 0 && wantedPort < 65536 ? wantedPort : 8080;
+const root = join(dirname(fileURLToPath(import.meta.url)), 'game');
+const port = Number(process.env.PORT ?? 8080);
 
-const mimeByExt = {
+const types: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
+  '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
+  '.ico': 'image/x-icon',
 };
 
-const server = createServer((req, res) => {
-  let path = '/';
+const server = createServer(async (req, res) => {
   try {
-    path = decodeURIComponent(new URL(req.url ?? '/', 'http://127.0.0.1').pathname);
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    let path = decodeURIComponent(url.pathname);
+    if (path === '/') path = '/index.html';
+    const file = normalize(join(root, path));
+    if (!file.startsWith(root)) throw new Error('outside root');
+    const body = await readFile(file);
+    res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' });
+    res.end(body);
   } catch {
-    res.writeHead(400);
-    res.end('bad request');
-    return;
-  }
-  if (path.endsWith('/')) path += 'index.html';
-  const file = resolve(join(gameRoot, normalize(path)));
-  if (file !== gameRoot && !file.startsWith(gameRoot + sep)) {
-    res.writeHead(403);
-    res.end('forbidden');
-    return;
-  }
-  let body;
-  try {
-    if (!statSync(file).isFile()) throw new Error('not a file');
-    body = readFileSync(file);
-  } catch {
-    res.writeHead(404);
+    res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
-    return;
   }
-  res.writeHead(200, {
-    'content-type': mimeByExt[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': body.length,
-    'cache-control': 'no-store',
-  });
-  res.end(body);
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Solmar City is on http://localhost:${port} (serving ${gameRoot})`);
+server.listen(port, () => {
+  console.log(`Solmar City — Streets of Gold at http://localhost:${port} (Ctrl+C to stop)`);
 });

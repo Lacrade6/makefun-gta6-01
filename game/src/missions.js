@@ -1,353 +1,292 @@
-// The mission engine: runs the story step by step, shows the briefing
-// dialogue, keeps the gold marker on the current objective, and pays out
-// cash and REP when a job is done. Steps are small and explicit — go to a
-// place, hold it, tail a car, beat a clock, or choose a side.
-
+// The eight-mission story: objectives, markers, timers and rewards.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { MISSIONS, FINALE_TEXT } from './story.js';
+import { PLACES } from './config.js';
+import { makeMarker } from './city.js';
+import { MISSION_DIALOGUE, INTRO } from './story.js';
+import { dist2d } from './rand.js';
 
-export class Missions {
-  constructor(ctx) {
-    this.ctx = ctx;
-    this.scene = ctx.scene;
-    this.index = -1;          // no mission running
+// Each mission: id, title, objective text, reward, and a step machine.
+// step kinds: 'go' (reach point), 'stealDeliver' (in any car at point),
+// 'casing' (visit points in order), 'timed' (go with countdown),
+// 'hold' (stay in radius for seconds), 'loseHeat' (stars>0 then 0),
+// 'repQuota' (earn REP), 'choice' (two destinations).
+export const MISSIONS = [
+  {
+    id: 'firstWheels', title: 'FIRST WHEELS', reward: 400, rep: 40,
+    objective: 'Steal a car and deliver it to Dex’s Garage',
+    steps: [{ kind: 'stealDeliver', at: PLACES.garage, text: 'Deliver a stolen car to Dex’s Garage' }],
+  },
+  {
+    id: 'courier', title: 'COURIER RUN', reward: 900, rep: 60,
+    objective: 'Pick up the package at the Sunset Diner, deliver it to the Palmera Hotel',
+    steps: [
+      { kind: 'go', at: PLACES.diner, text: 'Pick up the package at the Sunset Diner' },
+      { kind: 'timed', at: PLACES.hotel, seconds: 75, text: 'Deliver the package to the Palmera Hotel' },
+    ],
+  },
+  {
+    id: 'casing', title: 'HEIST I — CASING', reward: 600, rep: 70,
+    objective: 'Case the Meridian Bank: visit all three marked points',
+    steps: [{
+      kind: 'casing', text: 'Case the bank',
+      points: [
+        { x: PLACES.bank.x, z: PLACES.bank.z + 6, label: 'front entrance' },
+        { x: PLACES.bank.x + 42, z: PLACES.bank.z - 21, label: 'east approach' },
+        { x: PLACES.bank.x, z: PLACES.bank.z - 36, label: 'vault annexe' },
+      ],
+    }],
+  },
+  {
+    id: 'getaway', title: 'HEIST II — THE GETAWAY', reward: 800, rep: 80,
+    objective: 'Steal the sports car at Club Aurum and stash it behind the bank',
+    steps: [
+      { kind: 'go', at: PLACES.club, text: 'Get to the sports car at Club Aurum' },
+      { kind: 'stealDeliver', at: { x: PLACES.bank.x, z: PLACES.bank.z - 50 }, text: 'Stash the car behind the Meridian Bank', sportOnly: true },
+    ],
+  },
+  {
+    id: 'vault', title: 'HEIST III — THE VAULT', reward: 6000, rep: 220,
+    objective: 'Breach the vault, grab the gold, escape to the safehouse',
+    steps: [
+      { kind: 'go', at: { x: PLACES.bank.x, z: PLACES.bank.z - 34 }, text: 'Reach the vault annexe door' },
+      { kind: 'hold', at: { x: PLACES.bank.x, z: PLACES.bank.z - 34 }, seconds: 14, text: 'Hold position — June is drilling the vault', alarm: true },
+      { kind: 'go', at: PLACES.safehouse, text: 'Escape to the safehouse with the gold' },
+    ],
+  },
+  {
+    id: 'heatwave', title: 'HEAT WAVE', reward: 1200, rep: 90,
+    objective: 'Get the SCPD’s attention, then lose them completely',
+    steps: [{ kind: 'loseHeat', text: 'Raise your wanted level, then lose the police' }],
+  },
+  {
+    id: 'stuntMoney', title: 'STUNT MONEY', reward: 1500, rep: 0,
+    objective: 'Earn 150 REP from drifting and near-misses',
+    steps: [{ kind: 'repQuota', amount: 150, text: 'Earn REP: drift and near-miss traffic' }],
+  },
+  {
+    id: 'finale', title: 'STREETS OF GOLD', reward: 0, rep: 300,
+    objective: 'Choose: deliver the gold to the crew (loyalty) or take the boat (gold)',
+    steps: [{
+      kind: 'choice', text: 'Make your choice',
+      options: [
+        { at: PLACES.warehouse, ending: 'loyalty', label: 'Pier Warehouse — loyalty' },
+        { at: PLACES.marina, ending: 'gold', label: 'Solmar Marina — gold' },
+      ],
+    }],
+  },
+];
+
+export class MissionRunner {
+  constructor(scene, hooks) {
+    this.scene = scene;
+    this.hooks = hooks; // {onDialogue(lines, cb), onComplete(mission), onFail(mission), onAlarm(), onEnding(kind)}
+    this.index = 0;
     this.stepIndex = 0;
+    this.timer = 0;
+    this.holdProgress = 0;
+    this.repStart = 0;
+    this.sawHeat = false;
+    this.marker = makeMarker(0xffd23f);
+    this.marker2 = makeMarker(0xff5d8f);
+    this.marker.visible = false;
+    this.marker2.visible = false;
+    scene.add(this.marker, this.marker2);
     this.active = false;
-    this.completed = 0;       // missions finished this save
-    this.stepTimer = 0;
-    this.missionTimer = 0;
-    this.missionTimerRunning = false;
-    this.tailTime = 0;
-    this.spottedTime = 0;
-    this.lostTime = 0;
-    this.markedCar = null;
-    this.branch = null;
-    this.dialogueQueue = [];
-    this.dialogueTimer = 0;
-    this.failed = false;
-    this.waitingNext = false;
-    this._buildMarker();
+    this.finished = false;
   }
 
-  _buildMarker() {
-    const group = new THREE.Group();
-    const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.2, 2.2, 60, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffd76a, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }),
-    );
-    beam.position.y = 30;
-    group.add(beam);
-    const diamond = new THREE.Mesh(
-      new THREE.OctahedronGeometry(1.6),
-      new THREE.MeshBasicMaterial({ color: 0xffd76a }),
-    );
-    diamond.position.y = 7;
-    group.add(diamond);
-    this.markerDiamond = diamond;
-    group.visible = false;
-    this.scene.add(group);
-    this.marker = group;
+  current() {
+    return MISSIONS[this.index] ?? null;
   }
 
-  _resolvePoint(at) {
-    if (typeof at === 'string') {
-      if (at === 'marked' && this.markedCar) return { x: this.markedCar.x, z: this.markedCar.z };
-      const lm = this.ctx.city.landmarks[at];
-      // Missions point at a building's front steps, never its centre: the
-      // centre is inside the walls and the collision would push Rico out
-      // past the objective radius.
-      if (lm) return lm.front || { x: lm.x, z: lm.z };
-      return { x: 0, z: 0 };
+  start(fromIndex = 0, rep = 0) {
+    this.index = fromIndex;
+    this.finished = fromIndex >= MISSIONS.length;
+    this.beginMission(rep, fromIndex === 0);
+  }
+
+  beginMission(rep, withIntro = false) {
+    const m = this.current();
+    this.stepIndex = 0;
+    this.timer = 0;
+    this.holdProgress = 0;
+    this.sawHeat = false;
+    this.repStart = rep;
+    this.active = !!m;
+    this.placeMarkers();
+    if (!m) return;
+    const lines = withIntro ? INTRO : (MISSION_DIALOGUE[m.id]?.start ?? []);
+    if (lines.length) this.hooks.onDialogue(lines, null);
+  }
+
+  placeMarkers() {
+    const m = this.current();
+    this.marker.visible = false;
+    this.marker2.visible = false;
+    if (!m) return;
+    const step = m.steps[this.stepIndex];
+    if (!step) return;
+    if (step.kind === 'casing') {
+      const p = step.points[this.holdProgress];
+      if (p) {
+        this.marker.position.set(p.x, 0, p.z);
+        this.marker.visible = true;
+      }
+    } else if (step.kind === 'choice') {
+      this.marker.position.set(step.options[0].at.x, 0, step.options[0].at.z);
+      this.marker.visible = true;
+      this.marker2.position.set(step.options[1].at.x, 0, step.options[1].at.z);
+      this.marker2.visible = true;
+    } else if (step.at) {
+      this.marker.position.set(step.at.x, 0, step.at.z);
+      this.marker.visible = true;
     }
-    return at;
-  }
-
-  get def() {
-    return this.index >= 0 ? MISSIONS[this.index] : null;
-  }
-
-  get step() {
-    if (!this.def) return null;
-    const steps = this._steps();
-    return steps[this.stepIndex] || null;
-  }
-
-  _steps() {
-    if (!this.def) return [];
-    if (this.branch && this.def.branches) return [this.def.steps[0], ...this.def.branches[this.branch]];
-    return this.def.steps;
-  }
-
-  currentTarget() {
-    const step = this.step;
-    if (!step) return null;
-    if (step.kind === 'tail' || step.at === 'marked') {
-      if (this.markedCar) return { x: this.markedCar.x, z: this.markedCar.z, moving: true };
-      return null;
-    }
-    if (step.at) return { ...this._resolvePoint(step.at), moving: false };
-    return null;
   }
 
   objectiveText() {
-    if (this.failed) return { title: 'MISSION FAILED', text: 'Press R to retry this job', sub: '' };
-    if (this.waitingNext) {
-      const next = MISSIONS[this.index + 1];
-      return {
-        title: next ? 'JOB DONE' : 'STORY COMPLETE',
-        text: next ? `Press M — ${next.title}` : 'Rico owns Solmar City. Free roam!',
-        sub: next ? '' : 'Every mission complete. The city is yours.',
-      };
+    const m = this.current();
+    if (!m) return { title: 'FREE ROAM', text: 'Solmar City is yours. Explore, stunt, earn.' };
+    const step = m.steps[this.stepIndex];
+    let text = step?.text ?? m.objective;
+    if (step?.kind === 'casing') {
+      const p = step.points[this.holdProgress];
+      text = `Case the bank: ${p ? p.label : 'done'} (${this.holdProgress}/${step.points.length})`;
     }
-    const step = this.step;
-    if (!step || !this.def) {
-      return { title: 'SOLMAR CITY', text: 'Press M to start the next job', sub: 'Free roam — steal a car, explore, earn REP' };
+    if (step?.kind === 'repQuota') {
+      text = `Earn REP by drifting / near-misses (${Math.floor(this.repProgress)}/${step.amount})`;
     }
-    let sub = step.sub || '';
-    if (step.kind === 'hold' || step.kind === 'defend') {
-      sub = `${step.sub || ''} — ${Math.ceil(step.time - this.stepTimer)}s left`.trim();
-    }
-    if (step.kind === 'tail') {
-      sub = `${step.sub || ''} — ${Math.ceil(this.tailTime)}/${step.time}s in the pocket`.trim();
-    }
-    if (step.kind === 'timed') {
-      sub = `${step.sub || ''} — ${Math.ceil(this.missionTimer)}s on the clock`.trim();
-    }
-    if (step.kind === 'choice') {
-      sub = step.sub || '';
-    }
-    return { title: this.def.title, text: step.text, sub };
+    return { title: m.title, text };
   }
 
-  startMission(i) {
-    if (i < 0 || i >= MISSIONS.length) return false;
-    this.index = i;
-    this.stepIndex = 0;
-    this.active = true;
-    this.failed = false;
-    this.waitingNext = false;
-    this.stepTimer = 0;
-    this.missionTimer = 0;
-    this.missionTimerRunning = false;
-    this.tailTime = 0;
-    this.spottedTime = 0;
-    this.lostTime = 0;
-    this.branch = null;
-    this._defendWantedSet = false;
-    this._clearMarkedCar();
-    const def = this.def;
-    this.queueDialogue(def.briefing);
-    if (def.onStart === 'wanted2') this.ctx.police.setWanted(2);
-    if (def.onStart === 'wanted3') this.ctx.police.setWanted(3);
-    if (def.onStart === 'wanted0') this.ctx.police.clearWanted();
-    if (def.onStart === 'markedCar') this._spawnMarkedCar();
-    this.ctx.hud.showCenter(def.title, 'New job — listen to the crew');
-    return true;
+  targetPoint() {
+    const m = this.current();
+    if (!m) return null;
+    const step = m.steps[this.stepIndex];
+    if (!step) return null;
+    if (step.kind === 'casing') return step.points[this.holdProgress] ?? null;
+    if (step.kind === 'choice') return step.options[0].at;
+    return step.at ?? null;
   }
 
-  _spawnMarkedCar() {
-    const traffic = this.ctx.traffic;
-    const car = traffic.cars.find((c) => c.alive) || null;
-    if (!car) return;
-    this.markedCar = car;
-    car.mesh.children.forEach((child) => {
-      if (child.material && child.material.color) child.material.color.setHex(0x777777);
-    });
-    car.cruiseSpeed = 11;
-    car.marked = true;
-  }
-
-  _clearMarkedCar() {
-    if (this.markedCar) {
-      this.markedCar.marked = false;
-      this.markedCar = null;
-    }
-  }
-
-  queueDialogue(lines) {
-    for (const line of lines) this.dialogueQueue.push(line);
-  }
-
-  retry() {
-    if (this.index < 0) return;
-    this.startMission(this.index);
-  }
-
-  nextMission() {
-    if (this.waitingNext && this.index + 1 < MISSIONS.length) {
-      this.startMission(this.index + 1);
-      return true;
-    }
-    if (!this.active && this.index < 0) {
-      this.startMission(this.completed);
-      return true;
-    }
-    return false;
-  }
-
-  completeStep() {
-    this.stepIndex += 1;
-    this.stepTimer = 0;
-    this.tailTime = 0;
-    const steps = this._steps();
-    if (this.stepIndex >= steps.length) this._completeMission();
-    else this.ctx.audio.blip(880, 0.12, 'sine', 0.16);
-  }
-
-  _completeMission() {
-    const def = this.def;
-    const { player, audio, hud, save } = this.ctx;
-    player.cash += def.reward;
-    this.ctx.game.addRep(CFG.rep.mission);
-    this.completed = Math.max(this.completed, this.index + 1);
-    this.active = false;
-    this.waitingNext = true;
-    this.marker.visible = false;
-    this.ctx.police.holdMode = false;
-    audio.jingle();
-    hud.showCenter('MISSION PASSED', `+$${def.reward}  ·  +${CFG.rep.mission} REP`);
-    if (this.branch) {
-      this.queueDialogue(FINALE_TEXT[this.branch]);
-    }
-    if (this.index + 1 >= MISSIONS.length) {
-      this.ctx.game.storyComplete = true;
-    }
-    if (save) save.save();
-  }
-
-  fail(reason) {
-    if (!this.active || this.failed) return;
-    this.failed = true;
-    this.active = false;
-    this.marker.visible = false;
-    this.ctx.police.holdMode = false;
-    this.ctx.audio.failSting();
-    this.ctx.hud.showCenter('MISSION FAILED', `${reason} — press R to retry`);
-  }
-
-  _playerPos() {
-    return this.ctx.player;
-  }
-
-  _inRadius(at, r) {
-    const p = this._resolvePoint(at);
-    const pl = this._playerPos();
-    return Math.hypot(pl.x - p.x, pl.z - p.z) < r;
-  }
-
-  update(dt, input) {
-    // Dialogue queue: one line at a time, ~4.4 seconds each. Screenshot
-    // staging skips the dialogue so the frame stays clean.
-    if (!this.ctx.game.shotMode && this.dialogueQueue.length > 0) {
-      this.dialogueTimer -= dt;
-      if (this.dialogueTimer <= 0) {
-        const line = this.dialogueQueue.shift();
-        this.ctx.hud.showDialogue(line.who, line.text);
-        this.dialogueTimer = 4.4;
+  advanceStep(rep) {
+    this.stepIndex++;
+    this.timer = 0;
+    this.holdProgress = 0;
+    const m = this.current();
+    if (this.stepIndex >= m.steps.length) {
+      this.active = false;
+      this.marker.visible = false;
+      this.marker2.visible = false;
+      const doneLines = MISSION_DIALOGUE[m.id]?.done ?? [];
+      this.hooks.onComplete(m);
+      this.index++;
+      if (this.index >= MISSIONS.length) {
+        this.finished = true;
       }
-    }
-    if (!this.active || this.failed) {
-      this.marker.visible = false;
-      this.ctx.police.holdMode = false;
-      return;
-    }
-    const step = this.step;
-    if (!step) return;
-    // Hold and defend steps are a siege: fewer cruisers, and they approach
-    // to arrest rather than to kill, so standing the ground is survivable.
-    this.ctx.police.holdMode = step.kind === 'hold' || step.kind === 'defend';
-    const player = this.ctx.player;
-    const target = this.currentTarget();
-    if (target) {
-      this.marker.visible = true;
-      this.marker.position.set(target.x, 0, target.z);
-      this.markerDiamond.rotation.y += dt * 2.4;
-      this.markerDiamond.position.y = 7 + Math.sin(this.ctx.game.time * 2.2) * 0.8;
+      if (doneLines.length) {
+        this.hooks.onDialogue(doneLines, () => this.beginMission(rep));
+      } else {
+        this.beginMission(rep);
+      }
     } else {
-      this.marker.visible = false;
+      this.placeMarkers();
     }
+  }
+
+  // state: {playerPos, inCar, stars, rep, dt}
+  update(state) {
+    const m = this.current();
+    if (!m || !this.active) return;
+    const step = m.steps[this.stepIndex];
+    if (!step) return;
+    const dt = state.dt;
+    const px = state.playerPos.x;
+    const pz = state.playerPos.z;
+    this.repProgress = state.rep - this.repStart;
+    this.timerText = '';
+
+    const near = (p, r = 4.5) => dist2d(px, pz, p.x, p.z) < r;
 
     switch (step.kind) {
-      case 'steal': {
-        if (!player.onFoot) this.completeStep();
+      case 'go':
+        if (near(step.at)) this.advanceStep(state.rep);
         break;
-      }
-      case 'goto': {
-        if (step.inCar && player.onFoot) break;
-        if (step.onFoot && !player.onFoot) break;
-        if (this._inRadius(step.at, step.r)) this.completeStep();
-        break;
-      }
-      case 'hold':
-      case 'defend': {
-        if (step.kind === 'defend' && this.stepTimer === 0 && !this._defendWantedSet) {
-          this.ctx.police.setWanted(3);
-          this._defendWantedSet = true;
-        }
-        if (this._inRadius(step.at, step.r)) {
-          this.stepTimer += dt;
-          if (this.stepTimer >= step.time) this.completeStep();
-        } else if (step.kind === 'defend') {
-          this.stepTimer = Math.max(0, this.stepTimer - dt * 0.5);
+      case 'stealDeliver':
+        if (state.inCar && near(step.at, 6)
+          && (!step.sportOnly || state.inCar.kind === 'sport')) {
+          this.advanceStep(state.rep);
         }
         break;
-      }
       case 'timed': {
-        if (!this.missionTimerRunning) {
-          this.missionTimer = step.time;
-          this.missionTimerRunning = true;
+        if (this.timer === 0) this.timer = step.seconds;
+        this.timer -= dt;
+        this.timerText = `${Math.max(0, Math.ceil(this.timer))}s`;
+        if (near(step.at, 6)) {
+          this.advanceStep(state.rep);
+        } else if (this.timer <= 0) {
+          const failLines = MISSION_DIALOGUE[m.id]?.fail ?? [];
+          this.hooks.onFail(m);
+          if (failLines.length) this.hooks.onDialogue(failLines, null);
+          this.beginMission(state.rep);
         }
-        this.missionTimer -= dt;
-        if (this.missionTimer <= 0) {
-          this.fail('Out of time');
-          break;
-        }
-        if (step.inCar && player.onFoot) break;
-        if (this._inRadius(step.at, step.r)) this.completeStep();
         break;
       }
-      case 'tail': {
-        if (!this.markedCar) { this.fail('Lost the target'); break; }
-        const d = Math.hypot(player.x - this.markedCar.x, player.z - this.markedCar.z);
-        if (d < 8) {
-          this.spottedTime += dt;
-          if (this.spottedTime > 2.5) { this.fail('He spotted you'); break; }
-        } else {
-          this.spottedTime = 0;
+      case 'casing': {
+        const p = step.points[this.holdProgress];
+        if (p && near(p, 5.5)) {
+          this.holdProgress++;
+          this.hooks.onPoint?.(p.label);
+          if (this.holdProgress >= step.points.length) this.advanceStep(state.rep);
+          else this.placeMarkers();
         }
-        if (d > 45) {
-          this.lostTime += dt;
-          if (this.lostTime > 4) { this.fail('Lost the target'); break; }
-        } else {
-          this.lostTime = 0;
+        break;
+      }
+      case 'hold': {
+        if (step.alarm && !this.alarmFired) {
+          this.alarmFired = true;
+          this.hooks.onAlarm?.();
         }
-        if (d >= 12 && d <= 30) {
-          this.tailTime += dt;
-          if (this.tailTime >= step.time) {
-            // The rat stops at the plaza. Confront him on foot.
-            this.markedCar.cruiseSpeed = 0;
-            this.markedCar.speed = 0;
-            this.completeStep();
+        if (near(step.at, 5)) {
+          this.holdProgress += dt;
+          this.timerText = `DRILLING ${Math.ceil(step.seconds - this.holdProgress)}s`;
+          if (this.holdProgress >= step.seconds) {
+            this.alarmFired = false;
+            this.advanceStep(state.rep);
+          }
+        } else {
+          this.timerText = 'STAY AT THE VAULT DOOR';
+        }
+        break;
+      }
+      case 'loseHeat':
+        if (state.stars > 0) this.sawHeat = true;
+        if (this.sawHeat && state.stars === 0) this.advanceStep(state.rep);
+        break;
+      case 'repQuota':
+        if (this.repProgress >= step.amount) this.advanceStep(state.rep);
+        break;
+      case 'choice':
+        for (const opt of step.options) {
+          if (near(opt.at, 6)) {
+            this.active = false;
+            this.marker.visible = false;
+            this.marker2.visible = false;
+            this.hooks.onEnding(opt.ending);
+            this.hooks.onComplete(m);
+            this.index++;
+            this.finished = true;
+            return;
           }
         }
         break;
-      }
-      case 'choice': {
-        if (input.wasPressed('Digit1')) {
-          this.branch = 'loyalty';
-          this.ctx.hud.showDialogue('Rico', 'The crew comes first. We hold the garage.');
-          this.completeStep();
-        } else if (input.wasPressed('Digit2')) {
-          this.branch = 'gold';
-          this.ctx.hud.showDialogue('Rico', 'The gold is mine. All of it.');
-          this.ctx.police.setWanted(5);
-          this.completeStep();
-        }
-        break;
-      }
       default:
         break;
     }
+
+    // Pulse the markers.
+    const t = performance.now() / 1000;
+    const s = 1 + Math.sin(t * 3) * 0.12;
+    this.marker.scale.set(s, 1, s);
+    this.marker2.scale.set(s, 1, s);
   }
 }

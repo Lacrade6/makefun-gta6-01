@@ -1,96 +1,90 @@
-// Pickups scattered through the city: cash bundles, health kits and NOS
-// canisters. They spin and bob, glow so the player can spot them at
-// golden hour, and respawn elsewhere a while after being collected.
-
+// Scattered pickups: health, cash, NOS canisters and REP stars.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { makeRand, pick, range } from './rand.js';
+import { WORLD } from './config.js';
+import { roadLines } from './city.js';
+import { rng, pick, range, dist2d } from './rand.js';
 
 const KINDS = {
-  cash: { color: 0x37d67a, label: 'Cash', amount: 250 },
-  health: { color: 0xff5f6d, label: 'Health', amount: 40 },
-  nos: { color: 0x66aaff, label: 'NOS', amount: 60 },
+  health: { color: 0xff5d8f, label: '+HEALTH' },
+  cash: { color: 0x7dff9a, label: '+CASH' },
+  nos: { color: 0x37c8ff, label: '+NOS' },
+  rep: { color: 0xffd23f, label: '+REP' },
 };
 
+function makePickupMesh(kind) {
+  const g = new THREE.Group();
+  const color = KINDS[kind].color;
+  const mat = new THREE.MeshBasicMaterial({ color });
+  if (kind === 'health') {
+    const v = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.1, 0.35), mat);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.35, 0.35), mat);
+    g.add(v, h);
+  } else if (kind === 'cash') {
+    const bill = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.12, 0.6), mat);
+    g.add(bill);
+  } else if (kind === 'nos') {
+    const can = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 1.1, 10), mat);
+    g.add(can);
+  } else {
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.55), mat);
+    g.add(star);
+  }
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(0.8, 1.05, 24),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
+  );
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.y = -0.75;
+  g.add(halo);
+  return g;
+}
+
 export class Pickups {
-  constructor(scene, city) {
-    this.scene = scene;
-    this.city = city;
-    this.rand = makeRand(4242);
+  constructor(scene, count = 26) {
     this.items = [];
-    this._spawnInitial();
-  }
-
-  _randomSpot() {
-    const lines = this.city.roadLines;
-    const line = pick(this.rand, lines);
-    const along = range(this.rand, -CFG.city.half + 24, CFG.city.half - 24);
-    const side = this.rand() < 0.5 ? -1 : 1;
-    if (this.rand() < 0.5) return { x: line + side * 8, z: along };
-    return { x: along, z: line + side * 8 };
-  }
-
-  _makeItem(kind, x, z) {
-    const def = KINDS[kind];
-    const group = new THREE.Group();
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 1.1, 1.1),
-      new THREE.MeshLambertMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 0.55 }),
-    );
-    box.position.y = 1.1;
-    group.add(box);
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(1.3, 0.08, 8, 24),
-      new THREE.MeshBasicMaterial({ color: def.color }),
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.25;
-    group.add(ring);
-    group.position.set(x, 0, z);
-    this.scene.add(group);
-    return { kind, def, group, x, z, phase: range(this.rand, 0, 6), alive: true };
-  }
-
-  _spawnInitial() {
-    const kinds = ['cash', 'cash', 'cash', 'cash', 'health', 'health', 'nos', 'nos', 'cash', 'health'];
-    for (const kind of kinds) {
-      const spot = this._randomSpot();
-      this.items.push(this._makeItem(kind, spot.x, spot.z));
+    const lines = roadLines();
+    for (let i = 0; i < count; i++) {
+      const kind = pick(Object.keys(KINDS));
+      const x = pick(lines) + range(-3, 3);
+      const z = range(-WORLD.half + 14, WORLD.half - 14);
+      const mesh = makePickupMesh(kind);
+      mesh.position.set(x, 1.1, z);
+      scene.add(mesh);
+      this.items.push({ kind, mesh, x, z, taken: false, respawn: 0, phase: rng() * 6 });
     }
   }
 
-  _respawn(item) {
-    setTimeout(() => {
-      const spot = this._randomSpot();
-      const fresh = this._makeItem(item.kind, spot.x, spot.z);
-      const idx = this.items.indexOf(item);
-      if (idx >= 0) this.items[idx] = fresh;
-    }, 20000);
-  }
-
-  // Returns the collected item (or null) for a player at (x, z).
-  collect(x, z) {
+  // Returns the kind collected this frame, or null.
+  update(dt, playerPos) {
+    const t = performance.now() / 1000;
+    let collected = null;
     for (const item of this.items) {
-      if (!item.alive) continue;
-      if (Math.hypot(item.x - x, item.z - z) < 2.4) {
-        item.alive = false;
-        this.scene.remove(item.group);
-        this._respawn(item);
-        return item;
+      if (item.taken) {
+        item.respawn -= dt;
+        if (item.respawn <= 0) {
+          item.taken = false;
+          item.mesh.visible = true;
+        }
+        continue;
+      }
+      item.mesh.rotation.y = t * 1.6 + item.phase;
+      item.mesh.position.y = 1.1 + Math.sin(t * 2.2 + item.phase) * 0.18;
+      if (dist2d(playerPos.x, playerPos.z, item.x, item.z) < 2.0) {
+        item.taken = true;
+        item.respawn = 45;
+        item.mesh.visible = false;
+        collected = item.kind;
       }
     }
-    return null;
+    return collected;
   }
 
-  get aliveCount() {
-    return this.items.filter((item) => item.alive).length;
+  labelFor(kind) {
+    return KINDS[kind].label;
   }
 
-  update(dt, time) {
-    for (const item of this.items) {
-      if (!item.alive) continue;
-      item.group.rotation.y += dt * 1.6;
-      item.group.children[0].position.y = 1.1 + Math.sin(time * 2 + item.phase) * 0.22;
-    }
+  // Positions of live pickups (for the minimap / playtest checks).
+  activePositions() {
+    return this.items.filter((i) => !i.taken).map((i) => ({ x: i.x, z: i.z, kind: i.kind }));
   }
 }

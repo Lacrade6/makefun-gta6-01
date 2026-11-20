@@ -1,164 +1,178 @@
-// Rico on foot: a simple blocky character that walks, runs, jumps and
-// punches, and gets in and out of cars. On foot the camera sits behind him
-// and the mouse steers his facing.
-
+// Rico on foot: blocky character model, walk/run animation, third-person camera.
 import * as THREE from 'three';
-import { CFG } from './config.js';
-import { clamp, damp } from './rand.js';
+import { PLAYER_TUNE, WORLD } from './config.js';
+import { clamp, lerp } from './rand.js';
+import { collideCircle } from './city.js';
 
-export function makePersonMesh(shirt, pants, skin = 0xc98a5e) {
-  const group = new THREE.Group();
-  const shirtMat = new THREE.MeshLambertMaterial({ color: shirt });
-  const pantsMat = new THREE.MeshLambertMaterial({ color: pants });
-  const skinMat = new THREE.MeshLambertMaterial({ color: skin });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.95, 0.45), shirtMat);
-  torso.position.y = 1.25;
-  torso.castShadow = true;
-  group.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), skinMat);
-  head.position.y = 2.0;
-  head.castShadow = true;
-  group.add(head);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.16, 0.54), new THREE.MeshLambertMaterial({ color: 0xffd76a }));
-  cap.position.y = 2.28;
-  group.add(cap);
-  const legs = [];
-  for (const sx of [-0.22, 0.22]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.85, 0.36), pantsMat);
-    leg.position.set(sx, 0.43, 0);
-    leg.castShadow = true;
-    group.add(leg);
-    legs.push(leg);
-  }
-  const arms = [];
-  for (const sx of [-0.56, 0.56]) {
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.8, 0.3), shirtMat);
-    arm.position.set(sx, 1.25, 0);
-    arm.castShadow = true;
-    group.add(arm);
-    arms.push(arm);
-  }
-  group.userData.legs = legs;
-  group.userData.arms = arms;
-  return group;
+function limb(w, h, d, color) {
+  const pivot = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshLambertMaterial({ color }));
+  mesh.position.y = -h / 2;
+  pivot.add(mesh);
+  return pivot;
+}
+
+export function makeCharacterMesh(shirt = 0xff7a3c, pants = 0x2b3a55, skin = 0xc98a5a) {
+  const g = new THREE.Group();
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.34),
+    new THREE.MeshLambertMaterial({ color: shirt }));
+  torso.position.y = 1.18;
+  g.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.36),
+    new THREE.MeshLambertMaterial({ color: skin }));
+  head.position.y = 1.82;
+  g.add(head);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.42),
+    new THREE.MeshLambertMaterial({ color: 0xd83a3a }));
+  cap.position.y = 2.06;
+  g.add(cap);
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.3),
+    new THREE.MeshLambertMaterial({ color: 0xd83a3a }));
+  brim.position.set(0, 2.0, 0.32);
+  g.add(brim);
+
+  const armL = limb(0.16, 0.62, 0.16, shirt);
+  armL.position.set(-0.42, 1.52, 0);
+  const armR = limb(0.16, 0.62, 0.16, shirt);
+  armR.position.set(0.42, 1.52, 0);
+  const legL = limb(0.2, 0.78, 0.2, pants);
+  legL.position.set(-0.17, 0.8, 0);
+  const legR = limb(0.2, 0.78, 0.2, pants);
+  legR.position.set(0.17, 0.8, 0);
+  g.add(armL, armR, legL, legR);
+  g.userData = { armL, armR, legL, legR, head };
+  return g;
 }
 
 export class Player {
-  constructor(scene) {
-    this.scene = scene;
-    this.mesh = makePersonMesh(0x2a6a8a, 0x2c2c34);
-    this.mesh.position.set(-60, 0, 60);
-    scene.add(this.mesh);
-    this.x = -60;
-    this.z = 60;
+  constructor(scene, x, z) {
+    this.mesh = makeCharacterMesh();
+    this.pos = new THREE.Vector3(x, 0, z);
+    this.velY = 0;
     this.heading = 0;
-    this.camYaw = 0;
-    this.speed = 0;
-    this.health = CFG.player.health;
-    this.onFoot = true;
-    this.car = null;
-    this.vy = 0;
-    this.y = 0;
-    this.punchTimer = 0;
-    this.punchCooldown = 0;
+    this.health = PLAYER_TUNE.healthMax;
+    this.inCar = null;       // Car instance when driving
     this.walkPhase = 0;
-    this.cash = 0;
+    this.punchTimer = 0;
+    this.stunTimer = 0;
+    this.mesh.position.copy(this.pos);
+    scene.add(this.mesh);
   }
 
-  get pos() {
-    return { x: this.x, z: this.z };
-  }
-
-  // Move on foot. moveX/moveZ are in camera space (-1..1), dt seconds.
-  walk(moveX, moveZ, running, dt) {
-    const top = running ? CFG.player.runSpeed : CFG.player.walkSpeed;
-    const mx = moveX * top;
-    const mz = moveZ * top;
-    const mag = Math.hypot(mx, mz);
-    if (mag > 0.01) {
+  // Camera-relative movement on foot. camYaw is the camera orbit angle.
+  moveOnFoot(dt, input, camYaw, colliders) {
+    const axis = input.axis();
+    const speed = input.sprint() ? PLAYER_TUNE.sprintSpeed : PLAYER_TUNE.walkSpeed;
+    const sin = Math.sin(camYaw);
+    const cos = Math.cos(camYaw);
+    // Forward on screen is away from camera: (-sin, -cos) in world xz.
+    let mx = axis.x * cos - axis.y * sin;
+    let mz = -axis.x * sin - axis.y * cos;
+    const len = Math.hypot(mx, mz);
+    if (len > 0.01) {
+      mx /= len;
+      mz /= len;
+      this.pos.x += mx * speed * dt;
+      this.pos.z += mz * speed * dt;
       const targetHeading = Math.atan2(mx, mz);
       let d = targetHeading - this.heading;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;
-      this.heading += clamp(d, -CFG.player.turnSpeed * dt, CFG.player.turnSpeed * dt);
-      this.speed = damp(this.speed, Math.min(mag, top), 10, dt);
-    } else {
-      this.speed = damp(this.speed, 0, 12, dt);
+      this.heading += d * Math.min(1, dt * 12);
+      this.walkPhase += dt * (input.sprint() ? 13 : 9);
     }
-    this.x += Math.sin(this.heading) * this.speed * dt;
-    this.z += Math.cos(this.heading) * this.speed * dt;
-    // Jump and gravity.
-    if (this.y <= 0 && this.vy === 0 && this._jumpQueued) {
-      this.vy = 6.5;
-      this._jumpQueued = false;
+
+    if (input.justPressed('Space') && this.pos.y <= 0.01) {
+      this.velY = PLAYER_TUNE.jumpVelocity;
     }
-    if (this.y > 0 || this.vy !== 0) {
-      this.vy -= 22 * dt;
-      this.y += this.vy * dt;
-      if (this.y <= 0) { this.y = 0; this.vy = 0; }
-    }
-    this.mesh.position.set(this.x, this.y, this.z);
-    this.mesh.rotation.y = this.heading;
-    // Walk swing.
-    this.walkPhase += this.speed * dt * 1.6;
-    const swing = Math.sin(this.walkPhase) * clamp(this.speed / CFG.player.runSpeed, 0, 1) * 0.55;
-    this.mesh.userData.legs[0].rotation.x = swing;
-    this.mesh.userData.legs[1].rotation.x = -swing;
-    this.mesh.userData.arms[0].rotation.x = -swing * 0.8;
-    this.mesh.userData.arms[1].rotation.x = swing * 0.8;
+    this.velY -= PLAYER_TUNE.gravity * dt;
+    this.pos.y = Math.max(0, this.pos.y + this.velY * dt);
+    if (this.pos.y === 0) this.velY = 0;
+
+    const fixed = collideCircle(colliders, this.pos.x, this.pos.z, 0.55);
+    this.pos.x = clamp(fixed.x, -WORLD.half + 2, WORLD.half - 2);
+    this.pos.z = clamp(fixed.z, -WORLD.half + 2, WORLD.half - 2);
+    this.animate(dt, len > 0.01);
+  }
+
+  animate(dt, moving) {
+    const u = this.mesh.userData;
+    const swing = moving ? Math.sin(this.walkPhase) * 0.65 : 0;
+    u.legL.rotation.x = swing;
+    u.legR.rotation.x = -swing;
+    u.armL.rotation.x = -swing * 0.8;
     if (this.punchTimer > 0) {
       this.punchTimer -= dt;
-      const t = 1 - this.punchTimer / 0.28;
-      this.mesh.userData.arms[1].rotation.x = -1.4 * Math.sin(t * Math.PI);
+      u.armR.rotation.x = -1.5 * Math.sin(Math.min(1, this.punchTimer / 0.22) * Math.PI);
+    } else {
+      u.armR.rotation.x = swing * 0.8;
     }
-    if (this.punchCooldown > 0) this.punchCooldown -= dt;
-  }
-
-  queueJump() {
-    this._jumpQueued = true;
-  }
-
-  // Unit forward vector in world space, for combat and camera work.
-  facing() {
-    return { x: Math.sin(this.heading), z: Math.cos(this.heading) };
-  }
-
-  get moving() {
-    return this.speed > 0.5;
+    if (this.stunTimer > 0) {
+      this.stunTimer -= dt;
+      this.mesh.rotation.z = Math.sin(this.stunTimer * 20) * 0.12;
+    } else {
+      this.mesh.rotation.z = 0;
+    }
+    this.mesh.position.copy(this.pos);
+    this.mesh.rotation.y = this.heading;
   }
 
   punch() {
-    if (this.punchCooldown > 0 || !this.onFoot) return false;
-    this.punchTimer = 0.28;
-    this.punchCooldown = 0.45;
-    return true;
-  }
-
-  enterCar(car) {
-    this.onFoot = false;
-    this.car = car;
-    this.mesh.visible = false;
-  }
-
-  exitCar() {
-    if (!this.car) return;
-    const f = this.car.forward();
-    this.x = this.car.x - f.z * 3.2;
-    this.z = this.car.z + f.x * 3.2;
-    this.y = 0;
-    this.heading = this.car.heading;
-    this.mesh.position.set(this.x, 0, this.z);
-    this.mesh.visible = true;
-    this.onFoot = true;
-    this.car = null;
+    this.punchTimer = 0.22;
   }
 
   hurt(amount) {
-    this.health = Math.max(0, this.health - amount);
-    return this.health <= 0;
+    this.health = clamp(this.health - amount, 0, PLAYER_TUNE.healthMax);
+    this.stunTimer = 0.3;
   }
 
   heal(amount) {
-    this.health = Math.min(CFG.player.health, this.health + amount);
+    this.health = clamp(this.health + amount, 0, PLAYER_TUNE.healthMax);
+  }
+
+  // Slow regeneration keeps free-roam forgiving between missions.
+  regen(dt) {
+    if (this.health > 0 && this.health < PLAYER_TUNE.healthMax) {
+      this.health = clamp(this.health + dt * 1.2, 0, PLAYER_TUNE.healthMax);
+    }
+  }
+}
+
+// Orbit camera that follows a target, with collision-free simple clamping.
+export class FollowCamera {
+  constructor(camera) {
+    this.camera = camera;
+    this.yaw = Math.PI;
+    this.pitch = 0.32;
+    this.distance = 8;
+    this.shake = 0;
+    this.pos = new THREE.Vector3();
+  }
+
+  addShake(amount) {
+    this.shake = Math.min(1.2, this.shake + amount);
+  }
+
+  update(dt, input, target, driving) {
+    this.yaw -= input.mouseDX * 0.005;
+    this.pitch = clamp(this.pitch + input.mouseDY * 0.004, 0.05, 1.1);
+    const wantDist = driving ? 10.5 : 7.5;
+    this.distance = lerp(this.distance, wantDist, Math.min(1, dt * 3));
+
+    const cx = target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
+    const cz = target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
+    const cy = target.y + 2.2 + Math.sin(this.pitch) * this.distance;
+    this.pos.set(cx, Math.max(1.2, cy), cz);
+
+    if (this.shake > 0.001) {
+      const s = this.shake * 0.35;
+      this.pos.x += (Math.random() - 0.5) * s;
+      this.pos.y += (Math.random() - 0.5) * s;
+      this.pos.z += (Math.random() - 0.5) * s;
+      this.shake = Math.max(0, this.shake - dt * 2.2);
+    }
+    this.camera.position.copy(this.pos);
+    this.camera.lookAt(target.x, target.y + 1.6, target.z);
   }
 }
